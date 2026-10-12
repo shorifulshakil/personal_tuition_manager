@@ -1,0 +1,152 @@
+name: Build and Create GitHub Release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      CREATE_GITHUB_RELEASE:
+        description: 'Create GitHub Release?'
+        required: false
+        default: 'false'
+      RELEASE_TITLE:
+        description: 'Release title (if creating release)'
+        required: false
+        default: ''
+      RELEASE_NOTES:
+        description: 'Release notes (markdown supported)'
+        required: false
+        default: ''
+      CHANGELOG:
+        description: 'What changed in this release?'
+        required: false
+        default: ''
+      AUTO_GENERATE_NOTES:
+        description: 'Auto-generate release notes from commits?'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  APK_NAME: TeacherApp
+  ENVIRONMENT: production
+  BUILD_BASE_DIR: build
+  DEBUG_INFO_DIR: debug_info
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      KEYSTORE_PATH: /tmp/keystore/key_store_file.jks
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.3'
+          channel: 'stable'
+
+      - name: Verify Flutter Installation
+        run: |
+          flutter --version
+          flutter doctor
+
+      - name: Cache Flutter dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.pub-cache
+          key: flutter-${{ runner.os }}-${{ hashFiles('**/pubspec.yaml') }}
+          restore-keys: |
+            flutter-${{ runner.os }}-
+
+      - name: Cache Gradle
+        uses: actions/cache@v3
+        with:
+          path: ~/.gradle
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Install Flutter Dependencies
+        run: flutter pub get
+
+      - name: Generate Env File
+        run: |
+          echo "DB_NAME=app.db" > .env.production
+          echo 'APP_NAME="Personal Tuition Manager"' >> .env.production
+
+      - name: Extract Version from pubspec.yaml
+        run: |
+          VERSION_NAME=$(grep '^version:' pubspec.yaml | cut -d ':' -f2 | tr -d '[:space:]')
+          VERSION_NAME="${VERSION_NAME}-${GITHUB_RUN_NUMBER}"
+          echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
+
+      - name: Create Debug Info Directory
+        run: mkdir -p "${BUILD_BASE_DIR}/${DEBUG_INFO_DIR}"
+
+      - name: Build APK
+        run: |
+          flutter build apk --release \
+            --obfuscate \
+            --split-debug-info="${BUILD_BASE_DIR}/${DEBUG_INFO_DIR}" \
+            --dart-define=ENV=${ENVIRONMENT} \
+            --build-name="${VERSION_NAME}" \
+            --build-number=${GITHUB_RUN_NUMBER}
+
+      - name: Prepare Keystore
+        run: |
+          mkdir -p "$(dirname "$KEYSTORE_PATH")"
+          echo "${{ secrets.KEYSTORE_FILE }}" | base64 -d > "$KEYSTORE_PATH"
+
+      - name: Sign the APK
+        run: |
+          UNSIGNED_APK="${BUILD_BASE_DIR}/app/outputs/flutter-apk/app-release.apk"
+          SIGNED_APK="${BUILD_BASE_DIR}/app/outputs/flutter-apk/${APK_NAME}-${VERSION_NAME}-${ENVIRONMENT}-signed.apk"
+
+          DECODED_KEY_PASSWORD=$(echo "${{ secrets.KEY_PASSWORD }}" | base64 -d)
+          DECODED_KEY_ALIAS=$(echo "${{ secrets.KEY_ALIAS }}" | base64 -d)
+
+          jarsigner \
+            -sigalg SHA256withRSA \
+            -digestalg SHA-256 \
+            -keystore "$KEYSTORE_PATH" \
+            -storepass "$DECODED_KEY_PASSWORD" \
+            -keypass "$DECODED_KEY_PASSWORD" \
+            "$UNSIGNED_APK" "$DECODED_KEY_ALIAS"
+
+          mv "$UNSIGNED_APK" "$SIGNED_APK"
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: |
+            build/app/outputs/flutter-apk/*-signed.apk
+            build/debug_info/*
+
+      - name: Create GitHub Release
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.CREATE_GITHUB_RELEASE == 'true' }}
+        uses: softprops/action-gh-release@v1
+        with:
+          files: build/app/outputs/flutter-apk/*-signed.apk
+          tag_name: v${{ env.VERSION_NAME }}
+          draft: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup Keystore
+        if: always()
+        run: rm -f "$KEYSTORE_PATH"

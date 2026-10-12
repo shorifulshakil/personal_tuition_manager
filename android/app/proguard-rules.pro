@@ -1,0 +1,11 @@
+-keep class io.flutter.app.** { *; }
+-keep class io.flutter.plugin.** { *; }
+-keep class io.flutter.util.** { *; }
+-keep class io.flutter.view.** { *; }
+-keep class io.flutter.** { *; }
+-keep class io.flutter.plugins.** { *; }
+-keep class com.padma.yoglog.MainActivity { *; }
+-dontwarn com.google.android.play.core.**
+-keep class com.google.android.play.core.** { *; }
+-keepclassmembers class com.google.android.play.core.** { *; }
+-keepclassmembers class com.google.android.play.core.** { *; }

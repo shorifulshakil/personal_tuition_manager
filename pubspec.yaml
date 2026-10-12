@@ -1,0 +1,62 @@
+name: personal_tuition_manager
+description: "Your private, secure, and powerful assistant for managing tuition students."
+
+publish_to: "none"
+
+version: 1.0.0
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State + config
+  flutter_dotenv: ^5.0.2
+  provider:       ^6.1.2
+  shared_preferences: ^2.0.15
+
+  # Core utilities
+  intl: ^0.20.2
+  path:           ^1.9.1
+  path_provider:  ^2.1.5
+  url_launcher:   ^6.1.13
+  device_info_plus: ^9.0.0
+
+  # Data storage
+  sqflite:        ^2.4.0
+  synchronized: ^3.0.0
+
+  # File picking & permissions
+  file_picker: ^10.1.2
+  image_picker: ^1.1.2
+  share_plus: ^11.0.0
+  permission_handler: ^12.0.0+1
+
+  # UI & charts
+  cupertino_icons: ^1.0.8
+  fl_chart:       ^0.71.0
+  table_calendar: ^3.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter_native_splash:
+  color: "#ffffff"
+  android: true
+  ios: true
+  fill: true
+  android_gravity: center
+  ios_content_mode: scaleAspectFill
+  color_dark: "#000000"
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - .env
+    - assets/icon/app_icon.png

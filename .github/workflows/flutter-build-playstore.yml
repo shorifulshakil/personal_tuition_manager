@@ -1,0 +1,150 @@
+name: Upload to Google Play Store
+
+on:
+  workflow_dispatch:
+    inputs:
+      TRACK:
+        description: 'Track for Play Store release'
+        required: true
+        default: 'internal'
+        type: choice
+        options:
+          - internal
+          - alpha
+          - beta
+          - production
+      STATUS:
+        description: 'Release status for Play Store'
+        required: true
+        default: 'draft'
+        type: choice
+        options:
+          - draft
+          - completed
+          - inProgress
+          - halted
+
+env:
+  APK_NAME: TeacherApp
+  ENVIRONMENT: production
+  BUILD_BASE_DIR: build
+  DEBUG_INFO_DIR: debug_info
+  PACKAGE_NAME: com.padma.yoglog
+  KEYSTORE_PATH: /tmp/keystore/key_store_file.jks
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java (JDK 17)
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.3'
+          channel: 'stable'
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+
+      - name: Install Bundler and gems
+        working-directory: android
+        run: |
+          gem install bundler -v 2.7.2
+          bundle _2.7.2_ install
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Generate Env File
+        run: |
+          echo "DB_NAME=app.db" > .env.production
+          echo 'APP_NAME="Personal Tuition Manager"' >> .env.production
+
+      - name: Create Debug Info Directory
+        run: mkdir -p "${BUILD_BASE_DIR}/${DEBUG_INFO_DIR}"
+
+      - name: Build App Bundle (.aab)
+        run: |
+          flutter build appbundle --release \
+            --obfuscate \
+            --split-debug-info="${BUILD_BASE_DIR}/${DEBUG_INFO_DIR}" \
+            --dart-define=ENV=${ENVIRONMENT} \
+            --build-name="${GITHUB_RUN_NUMBER}" \
+            --build-number=${GITHUB_RUN_NUMBER}
+
+      - name: Prepare Keystore
+        run: |
+          mkdir -p "$(dirname "$KEYSTORE_PATH")"
+          echo "${{ secrets.KEYSTORE_FILE }}" | base64 -d > "$KEYSTORE_PATH"
+
+      - name: Sign AAB with jarsigner
+        run: |
+          UNSIGNED_AAB="${BUILD_BASE_DIR}/app/outputs/bundle/release/app-release.aab"
+          SIGNED_AAB="${BUILD_BASE_DIR}/app/outputs/bundle/release/app-release-signed.aab"
+
+          KEY_PASSWORD=$(echo "${{ secrets.KEY_PASSWORD }}" | base64 -d)
+          KEY_ALIAS=$(echo "${{ secrets.KEY_ALIAS }}" | base64 -d)
+
+          jarsigner \
+            -sigalg SHA256withRSA \
+            -digestalg SHA-256 \
+            -keystore "$KEYSTORE_PATH" \
+            -storepass "$KEY_PASSWORD" \
+            -keypass "$KEY_PASSWORD" \
+            "$UNSIGNED_AAB" "$KEY_ALIAS"
+
+          cp "$UNSIGNED_AAB" "$SIGNED_AAB"
+          echo "AAB_FILE_PATH=${GITHUB_WORKSPACE}/${SIGNED_AAB}" >> $GITHUB_ENV
+
+      - name: Verify signed AAB
+        run: |
+          jarsigner -verify -verbose -certs "$AAB_FILE_PATH"
+
+      - name: Prepare Play Store JSON Key
+        run: |
+          echo "${{ secrets.PLAY_STORE_JSON_KEY }}" | base64 -d > android/fastlane/play_store_json_key.json
+          echo "PLAY_STORE_JSON_PATH=${GITHUB_WORKSPACE}/android/fastlane/play_store_json_key.json" >> $GITHUB_ENV
+
+      - name: Ensure Fastfile default_platform
+        run: |
+          mkdir -p android/fastlane
+          if [ ! -f android/fastlane/Fastfile ]; then
+            echo "default_platform(:android)" > android/fastlane/Fastfile
+          fi
+
+      - name: Upload to Play Store (Fastlane)
+        working-directory: android
+        run: |
+          export FASTFILE_TRACK="${{ github.event.inputs.TRACK }}"
+          export FASTFILE_RELEASE_STATUS="${{ github.event.inputs.STATUS }}"
+          export PACKAGE_NAME="${PACKAGE_NAME}"
+
+          bundle _2.7.2_ exec fastlane deploy
+
+      - name: Cleanup Secrets
+        if: always()
+        run: |
+          rm -f "$KEYSTORE_PATH"
+          rm -f android/fastlane/play_store_json_key.json
+
+      - name: Final Status
+        if: always()
+        run: |
+          if [[ "${{ job.status }}" == "success" ]]; then
+            echo "::notice::Build completed successfully and uploaded to Play Store"
+          else
+            echo "::error::Build or upload failed"
+          fi
