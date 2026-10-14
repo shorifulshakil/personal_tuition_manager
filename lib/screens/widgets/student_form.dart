@@ -185,11 +185,14 @@ class _StudentFormState extends State<StudentForm> {
                 },
               ),
               const SizedBox(height: 16),
-              CustomElevatedButton(
-                text: widget.student != null ? 'Update' : 'Add',
-                onPressed: () async {
-                  await _saveForm(context);
-                },
+              SizedBox(
+                width: double.infinity,
+                child: CustomElevatedButton(
+                  text: widget.student != null ? 'Update' : 'Add',
+                  onPressed: () async {
+                    await _saveForm(context);
+                  },
+                ),
               ),
             ],
           ),
